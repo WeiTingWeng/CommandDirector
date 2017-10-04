@@ -1,22 +1,26 @@
 package com.timweng.lib.cmd.demo;
 
-import android.os.Handler;
-import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
-import android.util.Log;
+import android.support.v7.app.AppCompatActivity;
+import android.widget.TextView;
 
 import com.timweng.lib.cmd.Command;
 import com.timweng.lib.cmd.CommandDirector;
 import com.timweng.lib.cmd.unit.DelayCommand;
+import com.timweng.lib.cmd.unit.FunctionCommand;
 
 public class DemoActivity extends AppCompatActivity {
 
     private CommandDirector mCommandDirector = null;
+    private TextView mInfoTextView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_demo);
+
+        mInfoTextView = (TextView) findViewById(R.id.infoTextView);
+
         mCommandDirector = new CommandDirector();
     }
 
@@ -42,7 +46,7 @@ public class DemoActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
-    private class TestCmd extends Command {
+    private class TestCmd extends FunctionCommand {
 
         private int mTestNumber = -1;
 
@@ -51,14 +55,8 @@ public class DemoActivity extends AppCompatActivity {
         }
 
         @Override
-        public boolean start(Handler handler, Bundle bundle) {
-            if (!super.start(handler, bundle)) {
-                return false;
-            }
-            // TODO: Do function there
-            Log.d("timw", "mTestNumber = " + mTestNumber);
-            onComplete(null);
-            return true;
+        public void function() {
+            mInfoTextView.setText("" + mTestNumber);
         }
     }
 }
