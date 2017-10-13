@@ -55,8 +55,9 @@ public class DemoActivity extends AppCompatActivity {
         }
 
         @Override
-        public void function() {
+        public Bundle function(Bundle bundle) {
             mInfoTextView.setText("" + mTestNumber);
+            return null;
         }
     }
 }

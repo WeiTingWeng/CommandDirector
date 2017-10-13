@@ -51,6 +51,7 @@ public class CommandDirector {
     }
 
     protected volatile boolean mIsProcessing = false;
+    protected volatile boolean mIsPause = false;
 
     private Handler mMainHandler;
     private HandlerThread mThread;
@@ -60,22 +61,29 @@ public class CommandDirector {
     private Map<Integer, SpawnCommand.SpawnData> mSpawnMap = new HashMap<Integer, SpawnCommand.SpawnData>();
 
     private HashSet<OnDirectorUpdateListener> mListenerSet = new HashSet<OnDirectorUpdateListener>();
+    private Map<Command, Bundle> mStartBundleMap = new HashMap<>();
+
+    private final Object mControlLock = new Object();
 
     public CommandDirector() {
-        mMainHandler = new Handler(Looper.getMainLooper());
-        mThread = new HandlerThread("BehaviorManager.mThread");
-        mThread.start();
-        mHandler = new Handler(mThread.getLooper());
+        synchronized (mControlLock) {
+            mMainHandler = new Handler(Looper.getMainLooper());
+            mThread = new HandlerThread("BehaviorManager.mThread");
+            mThread.start();
+            mHandler = new Handler(mThread.getLooper());
+        }
     }
 
     /**
      * Release the CommandDirector when user no longer using it, if user want to using it, need to init() it again.
      */
     public void release() {
-        stopAllCurCommands();
-        mThread.quit();
-        mMainHandler = null;
-        mListenerSet.clear();
+        synchronized (mControlLock) {
+            stopAllCurCommands();
+            mThread.quit();
+            mMainHandler = null;
+            mListenerSet.clear();
+        }
     }
 
     /**
@@ -122,12 +130,91 @@ public class CommandDirector {
      * @return true if the Command can start, if player is processing return false
      */
     public boolean start(Command command) {
-        if (mIsProcessing) {
-            Debug.logD(TAG, "start() failed: mIsProcessing = " + mIsProcessing);
-            return false;
+        synchronized (mControlLock) {
+            if (mIsProcessing) {
+                Debug.logD(TAG, "start() failed: mIsProcessing = " + mIsProcessing);
+                return false;
+            }
+            mIsProcessing = true;
+            mIsPause = false;
+            mStartBundleMap.clear();
+            return startNext(command, null);
         }
-        mIsProcessing = true;
-        return startNext(command, null);
+    }
+
+    /**
+     * Stop the CommandDirector
+     *
+     * @return true if the CommandDirector can stop, if player is not processing return false
+     */
+    public boolean stop() {
+        synchronized (mControlLock) {
+            if (!mIsProcessing) {
+                Debug.logD(TAG, "stop() failed: mIsProcessing = " + mIsProcessing);
+                return false;
+            }
+            Debug.logD(TAG, "stop() successful, mCurCommandVector.size() = "
+                    + mCurCommandVector.size());
+            stopAllCurCommands();
+            mIsProcessing = false;
+            mIsPause = false;
+            mStartBundleMap.clear();
+            return true;
+        }
+    }
+
+    public boolean pause() {
+        synchronized (mControlLock) {
+            if (!mIsProcessing || mIsPause) {
+                Debug.logD(TAG, "pause() failed");
+                return false;
+            }
+            for (int i = 0; i < mCurCommandVector.size(); i++) {
+                Command cmd = mCurCommandVector.get(i);
+                if (cmd != null) {
+                    cmd.pause();
+                }
+            }
+            mIsProcessing = true;
+            mIsPause = true;
+            return true;
+        }
+    }
+
+    public boolean resume() {
+        synchronized (mControlLock) {
+            if (!mIsProcessing || !mIsPause) {
+                Debug.logD(TAG, "resume() failed");
+                return false;
+            }
+            for (int i = 0; i < mCurCommandVector.size(); i++) {
+                Command cmd = mCurCommandVector.get(i);
+                if (cmd != null) {
+                    if (cmd.isPause()) {
+                        cmd.resume();
+                    } else {
+                        cmd.start(mHandler, mStartBundleMap.get(cmd));
+                    }
+                }
+            }
+            mStartBundleMap.clear();
+            mIsProcessing = true;
+            mIsPause = false;
+            return true;
+        }
+    }
+
+    private void stopAllCurCommands() {
+        for (int i = 0; i < mCurCommandVector.size(); i++) {
+            Command command = mCurCommandVector.get(i);
+            if (command != null) {
+                command.stop();
+            }
+        }
+        mCurCommandVector.clear();
+        synchronized (mSpawnMap) {
+            mSpawnMap.clear();
+        }
     }
 
     private boolean startNext(Command command, Bundle bundle) {
@@ -153,48 +240,31 @@ public class CommandDirector {
                     } else {
                         mCurCommandVector.add(a);
                         a.setListener(mOnCommandUpdateListener);
-                        a.start(mHandler, bundle);
+                        if (mIsPause) {
+                            mStartBundleMap.put(a, bundle);
+                        } else {
+                            a.start(mHandler, bundle);
+                        }
                     }
                 }
+            } else {
+                startNext(command.getNext(), null);
             }
         } else {
             mCurCommandVector.add(command);
             command.setListener(mOnCommandUpdateListener);
-            command.start(mHandler, bundle);
+            if (!mIsProcessing) {
+                return false;
+            } else if (mIsPause) {
+                mStartBundleMap.put(command, bundle);
+                return false;
+            } else {
+                command.start(mHandler, bundle);
+            }
         }
 
         Debug.logD(TAG, "startNext() successful: " + command.toString());
         return true;
-    }
-
-    /**
-     * Stop the CommandDirector
-     *
-     * @return true if the CommandDirector can stop, if player is not processing return false
-     */
-    public boolean stop() {
-        if (!mIsProcessing) {
-            Debug.logD(TAG, "stop() failed: mIsProcessing = " + mIsProcessing);
-            return false;
-        }
-        Debug.logD(TAG, "stop() successful, mCurCommandVector.size() = "
-                + mCurCommandVector.size());
-        stopAllCurCommands();
-        mIsProcessing = false;
-        return true;
-    }
-
-    private void stopAllCurCommands() {
-        for (int i = 0; i < mCurCommandVector.size(); i++) {
-            Command command = mCurCommandVector.get(i);
-            if (command != null) {
-                command.stop();
-            }
-        }
-        mCurCommandVector.clear();
-        synchronized (mSpawnMap) {
-            mSpawnMap.clear();
-        }
     }
 
     private Command.OnCommandUpdateListener mOnCommandUpdateListener = new Command.OnCommandUpdateListener() {

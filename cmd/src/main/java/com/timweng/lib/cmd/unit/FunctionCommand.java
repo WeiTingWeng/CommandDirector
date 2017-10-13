@@ -16,10 +16,10 @@ public abstract class FunctionCommand extends Command {
         if (!super.start(handler, bundle)) {
             return false;
         }
-        function();
-        onComplete(null);
+        Bundle outputBundle = function(bundle);
+        onComplete(outputBundle);
         return true;
     }
 
-    public abstract void function();
+    public abstract Bundle function(Bundle inputBundle);
 }
